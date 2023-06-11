@@ -1,0 +1,176 @@
+(*-test code-*)
+
+(*--The two public channel--*)
+free c1: channel.
+free c2: channel.
+
+(*--The basic type--*)
+type key.
+type host.
+type nonce.
+type timestamp.
+type secretvalue.
+
+free TE,AS,CS: host.   
+free HIDte: bitstring [private].  
+free PWte: bitstring [private].   
+free ASj: bitstring.
+free AUte: bitstring [private].
+free Vi: bitstring [private].
+free Yi: bitstring [private].
+free Aij: bitstring [private]. 
+free SV1: key [private].  
+free SV2: key [private]. 
+free SKjk: key [private].
+free SKik: key [private].  
+free x1,x2,y: nonce [private].   
+
+(*--Hash operation--*) 
+fun hash(bitstring): bitstring.
+
+(*--XOR operation--*)
+fun XOR(bitstring, bitstring): bitstring.
+equation forall x: bitstring, y: bitstring; XOR(XOR(x, y), y) = x.
+
+(*--Concat operation--*)
+fun con(bitstring, bitstring): bitstring.
+reduc forall m1:bitstring,m2:bitstring; separate1(con(m1,m2))=m1.
+reduc forall m1:bitstring,m2:bitstring; separate2(con(m1,m2))=m2.
+
+(*--Shared key encryption--*)
+fun encrypt(key,bitstring):bitstring.
+reduc forall x:key, y:bitstring; decrypt(x,encrypt(x,y)) =y.
+
+(*--Biological encryption--*)
+fun Gen(key,bitstring):bitstring.
+reduc forall x:key, y:bitstring; Rep(x,Gen(x,y)) =y.
+
+(*--Check timestamp Fresh operation--*)
+fun checkfresh(timestamp, bool): bool
+reduc forall T: timestamp; checkfresh(T, true) = true
+otherwise forall T: timestamp; checkfresh(T, false) = false.
+
+(*--Mod operation--*)
+fun mod(bitstring, bitstring): bitstring.
+
+(*--Type convertion--*)
+fun key_to_bitstring(key): bitstring [data,typeConverter].
+fun nonce_to_bitstring(nonce): bitstring [data,typeConverter].
+fun bitstring_to_key(bitstring): key [data,typeConverter].
+fun timestamp_to_bitstring(timestamp): bitstring [data,typeConverter].
+fun bitstring_to_timestamp(bitstring): timestamp [data,typeConverter].
+fun secretvalue_to_bitstring(secretvalue): bitstring [data,typeConverter].
+
+(*--Authentication queries--*)
+event beginTEASact(host).
+event endTEASact(host).
+event beginCSTEact(host).
+event endCSTEact(host).
+event beginASCSact(host).
+event endASCSact(host).
+query x: host; inj-event(endTEASact(x)) ==> inj-event(beginTEASact(x)).
+query x: host; inj-event(endCSTEact(x)) ==> inj-event(beginCSTEact(x)).
+query x: host; inj-event(endASCSact(x)) ==> inj-event(beginASCSact(x)).
+
+(*--Queries--*)
+query attacker(HIDte).
+query attacker(SKjk).
+query attacker(SKik).
+
+(*--U--*)
+let processTE(HIDte: bitstring, ASj: bitstring, Rte: bitstring, PWte: bitstring, Vi: bitstring, Yi: bitstring, Bij: bitstring) =
+new x1: nonce;  
+new x2: nonce;
+new T1: timestamp;
+let ARG1=XOR(Vi,hash(con(con(HIDte,PWte),Rte))) in
+let ARG2=hash(con(ASj,ARG1)) in
+let Xi'=XOR(XOR(Yi,PWte),HIDte) in
+let Aij'=XOR(Bij,Xi') in
+let SHIDte=XOR(XOR(HIDte,nonce_to_bitstring(x1)),ARG2) in
+let M1=XOR(ARG2,nonce_to_bitstring(x1)) in
+let M2=XOR(hash(con(Aij',nonce_to_bitstring(x1))),nonce_to_bitstring(x2)) in
+let M3=hash(con(con(HIDte,nonce_to_bitstring(x1)),nonce_to_bitstring(x2))) in
+let AUte=hash(con(con(con(HIDte,ASj),M3),timestamp_to_bitstring(T1))) in
+event beginTEASact(TE);
+out(c1, (SHIDte, M1, M2, AUte, T1, true));
+in(c1, (m0:bitstring, m1:bitstring, m2:timestamp, m3:bool));
+let T3=m2 in
+if checkfresh(T3, m3) = true 
+then
+let M6=m0 in
+let AUs=m1 in
+let M4'=hash(con(con(con(con(HIDte,ASj),nonce_to_bitstring(x1)),nonce_to_bitstring(x2)),Aij')) in
+let y'=XOR(M6,M4') in
+let SKik'=hash(con(con(con(M4',ASj),y'),timestamp_to_bitstring(T3))) in
+let AUs'=hash(con(con(key_to_bitstring(SKik),M4'),y')) in
+if AUs'=AUs then
+let SessionKeyik=SKik' in
+event endCSTEact(TE).
+
+
+(*--AS--*)
+let processASever(ASj: bitstring, SV1: secretvalue, SV2: secretvalue, SKjk:key) =
+new T2: timestamp;
+in(c1, (m0: bitstring, m1: bitstring, m2: bitstring, m3: bitstring, m4: timestamp, m5: bool));
+let T1=m4 in
+if checkfresh(T1, m5) = true 
+then
+let SHIDte=m0 in
+let M1=m1 in
+let M2=m2 in
+let AUte=m3 in
+let ARG2'=hash(con(ASj,secretvalue_to_bitstring(SV1))) in
+let x1'=XOR(M1,ARG2') in
+let HIDte'=XOR(XOR(SHIDte,x1'),ARG2') in
+let Aij'=hash(con(HIDte',secretvalue_to_bitstring(SV2))) in
+let x2'=XOR(hash(con(Aij',x1')),M2) in
+let M3'=hash(con(con(HIDte',x1'),x2')) in
+let AUte'=hash(con(con(con(HIDte',ASj),M3'),timestamp_to_bitstring(T1))) in
+if AUte'=AUte then
+event endTEASact(AS);
+let M4=hash(con(con(con(con(HIDte',ASj),x1'),x2'),Aij')) in
+let M5=encrypt(SKjk,con(M4,timestamp_to_bitstring(T2))) in
+out(c2,(M5,true));
+event beginASCSact(AS).
+
+(*--CS--*)
+let processCSever(ASj:bitstring, SKjk:key) =
+new y: nonce; 
+new T3: timestamp;
+in(c2, (m0:bitstring, m1:bool));
+let M5=m0 in
+let plaintext=decrypt(SKjk,M5) in
+let M4'=separate1(plaintext) in
+let T2=bitstring_to_timestamp(separate1(plaintext)) in
+if checkfresh(T2, m1) = true  then
+let M6=XOR(nonce_to_bitstring(y),M4') in
+event endASCSact(CS);
+let SKik=hash(con(con(con(M4',ASj),nonce_to_bitstring(y)),timestamp_to_bitstring(T3))) in
+let AUs=hash(con(con(SKik,M4'),nonce_to_bitstring(y))) in
+out(c1,(M6, AUs, T3, true));
+event beginCSTEact(CS).
+
+
+(*--Start process--*)
+process
+
+new HIDte: bitstring;
+new Rte: bitstring;
+new PWte: bitstring;
+new ASj: bitstring;
+new Vi: bitstring;
+new Yi: bitstring;
+new Aij: bitstring;
+new Bij: bitstring;
+new SV1: secretvalue;
+new SV2: secretvalue;
+new SKjk: key;
+new SKik: key;
+
+
+(
+      (!processTE(HIDte, ASj, Rte, PWte, Vi, Yi, Bij)) |  (!processASever(ASj, SV1, SV2, SKjk)) | (!processCSever(ASj, SKjk)) 
+)
+
+
+
